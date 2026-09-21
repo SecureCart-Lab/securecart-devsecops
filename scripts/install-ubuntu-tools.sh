@@ -4,30 +4,21 @@
 set -Eeuo pipefail
 
 # =============================================================================
-# SecureCart DevSecOps Workstation Bootstrap
+# SecureCart DevSecOps Engineering Workstation Bootstrap
 #
 # Target:
 #   Ubuntu 24.04 LTS
 #
-# Purpose:
-#   Prepare a brand-new EC2 workstation with the engineering tools required
-#   for the SecureCart DevSecOps project.
+# Run as:
+#   ./scripts/install-ubuntu-tools.sh
 #
-# IMPORTANT:
-#   Run this script as the normal Ubuntu user:
-#
-#       ./scripts/install-ubuntu-tools.sh
-#
-#   DO NOT run the entire script with sudo:
-#
-#       sudo ./scripts/install-ubuntu-tools.sh
-#
-#   The script uses sudo internally only where required.
+# DO NOT run as:
+#   sudo ./scripts/install-ubuntu-tools.sh
 # =============================================================================
 
 
 # -----------------------------------------------------------------------------
-# 1. Safety check: do not run entire script as root
+# 1. Safety checks
 # -----------------------------------------------------------------------------
 
 if [[ "${EUID}" -eq 0 ]]; then
@@ -40,16 +31,20 @@ if [[ "${EUID}" -eq 0 ]]; then
     exit 1
 fi
 
+INSTALL_USER="$(id -un)"
+USER_HOME="${HOME}"
+
 
 # -----------------------------------------------------------------------------
-# 2. Verify operating system
+# 2. Verify Ubuntu 24.04
 # -----------------------------------------------------------------------------
 
 if [[ ! -f /etc/os-release ]]; then
-    echo "ERROR: Cannot determine operating system."
+    echo "ERROR: /etc/os-release was not found."
     exit 1
 fi
 
+# shellcheck disable=SC1091
 source /etc/os-release
 
 if [[ "${ID}" != "ubuntu" ]]; then
@@ -59,7 +54,7 @@ if [[ "${ID}" != "ubuntu" ]]; then
 fi
 
 if [[ "${VERSION_ID}" != "24.04" ]]; then
-    echo "ERROR: This installer is designed for Ubuntu 24.04 LTS."
+    echo "ERROR: This installer requires Ubuntu 24.04 LTS."
     echo "Detected version: ${VERSION_ID}"
     exit 1
 fi
@@ -68,7 +63,7 @@ UBUNTU_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME}}"
 
 
 # -----------------------------------------------------------------------------
-# 3. Detect processor architecture
+# 3. Detect architecture
 # -----------------------------------------------------------------------------
 
 ARCH="$(dpkg --print-architecture)"
@@ -81,7 +76,7 @@ case "${ARCH}" in
         KUBECTL_ARCH="arm64"
         ;;
     *)
-        echo "ERROR: Unsupported CPU architecture: ${ARCH}" >&2
+        echo "ERROR: Unsupported architecture: ${ARCH}" >&2
         exit 1
         ;;
 esac
@@ -92,31 +87,47 @@ esac
 # -----------------------------------------------------------------------------
 
 cleanup() {
-
     rm -f \
         /tmp/aws-cli-install.sh \
         /tmp/kubectl \
         /tmp/kubectl.sha256 \
-        /tmp/get_helm.sh
+        /tmp/get_helm.sh \
+        /tmp/hashicorp-archive-keyring.gpg
 }
 
 trap cleanup EXIT
 
 
 # -----------------------------------------------------------------------------
-# 5. Display environment
+# 5. Error reporting
+# -----------------------------------------------------------------------------
+
+trap 'echo; echo "ERROR: Installation failed at line ${LINENO}."; exit 1' ERR
+
+
+# -----------------------------------------------------------------------------
+# 6. Display environment
 # -----------------------------------------------------------------------------
 
 printf '\n'
 printf '============================================================\n'
 printf ' SecureCart DevSecOps Workstation Bootstrap\n'
 printf '============================================================\n'
-printf 'User:               %s\n' "${USER}"
+printf 'User:               %s\n' "${INSTALL_USER}"
 printf 'Operating system:   Ubuntu %s\n' "${VERSION_ID}"
 printf 'Ubuntu codename:    %s\n' "${UBUNTU_CODENAME}"
 printf 'Architecture:       %s\n' "${ARCH}"
-printf 'Home directory:     %s\n' "${HOME}"
+printf 'Home directory:     %s\n' "${USER_HOME}"
 printf '============================================================\n'
+
+
+# -----------------------------------------------------------------------------
+# 7. Validate sudo access
+# -----------------------------------------------------------------------------
+
+printf '\n==> Validating sudo access\n'
+
+sudo -v
 
 
 # =============================================================================
@@ -152,30 +163,19 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 
 # =============================================================================
-# PHASE 2 - DOCKER ENGINE
+# PHASE 2 - DOCKER ENGINE AND DOCKER COMPOSE V2
 # =============================================================================
 
-printf '\n==> PHASE 2: Configuring Docker official repository\n'
-
-
-# Create directory for repository signing keys.
+printf '\n==> PHASE 2: Configuring Docker repository\n'
 
 sudo install -m 0755 -d /etc/apt/keyrings
-
-
-# Download Docker's official signing key.
 
 sudo curl -fsSL \
     https://download.docker.com/linux/ubuntu/gpg \
     -o /etc/apt/keyrings/docker.asc
 
-
-# Make the signing key readable by APT.
-
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-
-# Configure Docker's official Ubuntu repository.
 
 sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
 Types: deb
@@ -192,7 +192,7 @@ printf '\n==> Updating package index with Docker repository\n'
 sudo apt-get update
 
 
-printf '\n==> Installing Docker Engine\n'
+printf '\n==> Installing Docker Engine, Buildx, and Compose v2\n'
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     docker-ce \
@@ -202,21 +202,38 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
     docker-compose-plugin
 
 
-printf '\n==> Enabling Docker service\n'
+printf '\n==> Enabling and starting Docker\n'
 
 sudo systemctl enable --now docker
 
 
-printf '\n==> Adding %s to Docker group\n' "${USER}"
+printf '\n==> Adding %s to the docker group\n' "${INSTALL_USER}"
 
-sudo usermod -aG docker "${USER}"
+sudo usermod -aG docker "${INSTALL_USER}"
+
 
 printf '\n==> Verifying Docker group configuration\n'
 
-if getent group docker | awk -F: -v user="${USER}" '{ n=split($4,a,","); for (i=1;i<=n;i++) if (a[i]==user) found=1 } END { exit(found ? 0 : 1) }'; then
-    printf '[OK] User %s is configured as a member of the docker group.\n' "${USER}"
+if getent group docker \
+    | awk -F: -v user="${INSTALL_USER}" '
+        {
+            n=split($4,members,",")
+            for (i=1; i<=n; i++) {
+                if (members[i] == user) {
+                    found=1
+                }
+            }
+        }
+        END {
+            exit(found ? 0 : 1)
+        }
+    '
+then
+    printf '[OK] %s is configured as a member of the docker group.\n' \
+        "${INSTALL_USER}"
 else
-    printf 'ERROR: User %s was not added to the docker group.\n' "${USER}" >&2
+    printf 'ERROR: %s was not added to the docker group.\n' \
+        "${INSTALL_USER}" >&2
     exit 1
 fi
 
@@ -225,7 +242,7 @@ printf '\n==> Verifying Docker daemon\n'
 
 sudo docker info >/dev/null
 
-printf 'Docker daemon is running successfully.\n'
+printf '[OK] Docker daemon is running.\n'
 
 
 # =============================================================================
@@ -234,23 +251,16 @@ printf 'Docker daemon is running successfully.\n'
 
 printf '\n==> PHASE 3: Installing AWS CLI v2\n'
 
-
-# Download AWS's official AWS CLI installation script.
-
 curl -fsSL \
     https://awscli.amazonaws.com/v2/install.sh \
     -o /tmp/aws-cli-install.sh
 
-
 chmod 700 /tmp/aws-cli-install.sh
-
-
-# Install system-wide under /usr/local.
 
 sudo bash /tmp/aws-cli-install.sh --system
 
 
-printf '\n==> Verifying AWS CLI installation\n'
+printf '\n==> Verifying AWS CLI\n'
 
 aws --version
 
@@ -261,21 +271,18 @@ aws --version
 
 printf '\n==> PHASE 4: Configuring HashiCorp repository\n'
 
-
-# Download and install HashiCorp repository signing key.
-
-wget -O- https://apt.releases.hashicorp.com/gpg \
+curl -fsSL \
+    https://apt.releases.hashicorp.com/gpg \
     | gpg --dearmor \
-    | sudo tee \
-        /usr/share/keyrings/hashicorp-archive-keyring.gpg \
-        >/dev/null
+    > /tmp/hashicorp-archive-keyring.gpg
 
-
-sudo chmod 0644 \
+sudo install \
+    -o root \
+    -g root \
+    -m 0644 \
+    /tmp/hashicorp-archive-keyring.gpg \
     /usr/share/keyrings/hashicorp-archive-keyring.gpg
 
-
-# Configure HashiCorp's official APT repository.
 
 echo \
 "deb [arch=${ARCH} signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${UBUNTU_CODENAME} main" \
@@ -298,41 +305,26 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y terraform
 # PHASE 5 - KUBECTL
 # =============================================================================
 
-#
-# SecureCart EKS target:
-#
-#     Kubernetes 1.36
-#
-# kubectl should remain within one minor version of the EKS control plane.
-#
-
 KUBECTL_VERSION="v1.36.2"
-
 
 printf '\n==> PHASE 5: Installing kubectl %s\n' "${KUBECTL_VERSION}"
 
-
-# Download kubectl.
 
 curl -fsSLo /tmp/kubectl \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl"
 
 
-# Download the official SHA256 checksum.
-
 curl -fsSLo /tmp/kubectl.sha256 \
     "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl.sha256"
 
 
-printf '\n==> Verifying kubectl SHA256 checksum\n'
-
+printf '\n==> Verifying kubectl checksum\n'
 
 echo "$(cat /tmp/kubectl.sha256)  /tmp/kubectl" \
     | sha256sum --check
 
 
-printf '\n==> Installing kubectl into /usr/local/bin\n'
-
+printf '\n==> Installing kubectl\n'
 
 sudo install \
     -o root \
@@ -343,110 +335,63 @@ sudo install \
 
 
 # =============================================================================
-# PHASE 6 - HELM
+# PHASE 6 - HELM 3
 # =============================================================================
 
 printf '\n==> PHASE 6: Installing Helm 3\n'
-
-
-# Download the official Helm 3 installer.
 
 curl -fsSL \
     https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
     -o /tmp/get_helm.sh
 
-
 chmod 700 /tmp/get_helm.sh
-
-
-# Execute installer.
 
 bash /tmp/get_helm.sh
 
 
 # =============================================================================
-# PHASE 7 - CONFIGURE USER-LOCAL PATH
+# PHASE 7 - USER-LOCAL PATH FOR PIPX APPLICATIONS
 # =============================================================================
-
-#
-# pipx exposes installed CLI applications under:
-#
-#     ~/.local/bin
-#
-# This directory must be on PATH for commands such as:
-#
-#     ggshield
-#     checkov
-#
-# This section handles:
-#
-#   - the current installer process
-#   - future SSH sessions
-#   - VS Code Remote SSH terminals
-#
 
 printf '\n==> PHASE 7: Configuring ~/.local/bin\n'
 
-
-LOCAL_BIN="${HOME}/.local/bin"
+LOCAL_BIN="${USER_HOME}/.local/bin"
 
 mkdir -p "${LOCAL_BIN}"
 
-
-# Make ~/.local/bin available immediately while this script is running.
-
 export PATH="${LOCAL_BIN}:${PATH}"
-
 
 PATH_EXPORT='export PATH="$HOME/.local/bin:$PATH"'
 
 
 # -----------------------------------------------------------------------------
-# Add PATH to ~/.profile for login shells
+# ~/.profile
 # -----------------------------------------------------------------------------
 
-touch "${HOME}/.profile"
+touch "${USER_HOME}/.profile"
 
-
-if ! grep -Fqx "${PATH_EXPORT}" "${HOME}/.profile"; then
-
-    cat >> "${HOME}/.profile" <<'EOF'
+if ! grep -Fqx "${PATH_EXPORT}" "${USER_HOME}/.profile"; then
+    cat >> "${USER_HOME}/.profile" <<'EOF'
 
 # User-local command-line applications
 export PATH="$HOME/.local/bin:$PATH"
 EOF
-
-    printf 'Added ~/.local/bin to ~/.profile\n'
-
-else
-
-    printf '~/.local/bin already exists in ~/.profile\n'
-
 fi
 
 
 # -----------------------------------------------------------------------------
-# Add PATH to ~/.bashrc for interactive / VS Code Remote SSH terminals
+# ~/.bashrc
 # -----------------------------------------------------------------------------
 
-touch "${HOME}/.bashrc"
+touch "${USER_HOME}/.bashrc"
 
-
-if ! grep -Fqx "${PATH_EXPORT}" "${HOME}/.bashrc"; then
-
-    cat >> "${HOME}/.bashrc" <<'EOF'
+if ! grep -Fqx "${PATH_EXPORT}" "${USER_HOME}/.bashrc"; then
+    cat >> "${USER_HOME}/.bashrc" <<'EOF'
 
 # User-local command-line applications
-# Includes applications installed using pipx.
+# Includes applications installed by pipx.
 export PATH="$HOME/.local/bin:$PATH"
 EOF
-
-    printf 'Added ~/.local/bin to ~/.bashrc\n'
-
-else
-
-    printf '~/.local/bin already exists in ~/.bashrc\n'
-
 fi
 
 
@@ -455,7 +400,6 @@ fi
 # =============================================================================
 
 printf '\n==> PHASE 8: Installing GitGuardian ggshield with pipx\n'
-
 
 pipx install ggshield
 
@@ -466,17 +410,15 @@ pipx install ggshield
 
 printf '\n==> PHASE 9: Installing Checkov with pipx\n'
 
-
 pipx install checkov
 
 
-# Refresh Bash command lookup cache.
-
+# Refresh Bash command cache.
 hash -r
 
 
 # =============================================================================
-# PHASE 10 - VERIFY COMMAND PATHS
+# PHASE 10 - VERIFY REQUIRED COMMAND PATHS
 # =============================================================================
 
 printf '\n'
@@ -488,6 +430,7 @@ printf '============================================================\n'
 REQUIRED_COMMANDS=(
     git
     java
+    javac
     mvn
     docker
     aws
@@ -498,6 +441,11 @@ REQUIRED_COMMANDS=(
     pipx
     ggshield
     checkov
+    rsync
+    curl
+    wget
+    unzip
+    openssl
 )
 
 
@@ -526,16 +474,109 @@ done
 if [[ "${FAILED}" -ne 0 ]]; then
 
     printf '\n'
-    printf 'ERROR: One or more required commands could not be found.\n'
+    printf 'ERROR: One or more required commands are missing.\n'
     printf 'Review the installation output above.\n'
 
     exit 1
-
 fi
 
 
 # =============================================================================
-# PHASE 11 - DISPLAY INSTALLED VERSIONS
+# PHASE 11 - VERIFY DOCKER SERVICE AND GROUP DATABASE
+# =============================================================================
+
+printf '\n'
+printf '============================================================\n'
+printf ' Docker Verification\n'
+printf '============================================================\n'
+
+
+printf '\n--- Docker service ------------------------------\n'
+
+if [[ "$(sudo systemctl is-active docker)" != "active" ]]; then
+    echo "ERROR: Docker service is not active."
+    exit 1
+fi
+
+printf '[OK] Docker service is active.\n'
+
+
+if [[ "$(sudo systemctl is-enabled docker)" != "enabled" ]]; then
+    echo "ERROR: Docker service is not enabled."
+    exit 1
+fi
+
+printf '[OK] Docker service is enabled.\n'
+
+
+printf '\n--- Docker group --------------------------------\n'
+
+getent group docker
+
+
+if getent group docker \
+    | awk -F: -v user="${INSTALL_USER}" '
+        {
+            n=split($4,members,",")
+            for (i=1; i<=n; i++) {
+                if (members[i] == user) {
+                    found=1
+                }
+            }
+        }
+        END {
+            exit(found ? 0 : 1)
+        }
+    '
+then
+    printf '[OK] %s is recorded in the docker group.\n' \
+        "${INSTALL_USER}"
+else
+    printf 'ERROR: %s is not recorded in the docker group.\n' \
+        "${INSTALL_USER}" >&2
+    exit 1
+fi
+
+
+printf '\n--- Docker daemon -------------------------------\n'
+
+sudo docker info >/dev/null
+
+printf '[OK] Docker daemon responds successfully.\n'
+
+
+# =============================================================================
+# PHASE 12 - VERIFY PIPX APPLICATION PATHS
+# =============================================================================
+
+printf '\n'
+printf '============================================================\n'
+printf ' pipx Application Verification\n'
+printf '============================================================\n'
+
+
+GGSHIELD_PATH="$(command -v ggshield)"
+CHECKOV_PATH="$(command -v checkov)"
+
+
+printf 'ggshield: %s\n' "${GGSHIELD_PATH}"
+printf 'checkov:   %s\n' "${CHECKOV_PATH}"
+
+
+if [[ "${GGSHIELD_PATH}" != "${USER_HOME}/.local/bin/ggshield" ]]; then
+    echo "ERROR: ggshield is not resolving from ~/.local/bin."
+    exit 1
+fi
+
+
+if [[ "${CHECKOV_PATH}" != "${USER_HOME}/.local/bin/checkov" ]]; then
+    echo "ERROR: Checkov is not resolving from ~/.local/bin."
+    exit 1
+fi
+
+
+# =============================================================================
+# PHASE 13 - DISPLAY INSTALLED VERSIONS
 # =============================================================================
 
 printf '\n'
@@ -548,8 +589,12 @@ printf '\n--- Git -----------------------------------------\n'
 git --version
 
 
-printf '\n--- Java ----------------------------------------\n'
+printf '\n--- Java runtime --------------------------------\n'
 java -version
+
+
+printf '\n--- Java compiler -------------------------------\n'
+javac -version
 
 
 printf '\n--- Maven ---------------------------------------\n'
@@ -558,6 +603,10 @@ mvn --version
 
 printf '\n--- Docker --------------------------------------\n'
 docker --version
+
+
+printf '\n--- Docker Buildx -------------------------------\n'
+docker buildx version
 
 
 printf '\n--- Docker Compose ------------------------------\n'
@@ -596,8 +645,12 @@ printf '\n--- Checkov -------------------------------------\n'
 checkov --version
 
 
+printf '\n--- rsync ---------------------------------------\n'
+rsync --version | head -n 1
+
+
 # =============================================================================
-# PHASE 12 - FINAL INSTRUCTIONS
+# PHASE 14 - FINAL INSTRUCTIONS
 # =============================================================================
 
 printf '\n'
@@ -610,42 +663,77 @@ printf '\n'
 printf 'The engineering workstation was initialized successfully.\n'
 
 
-printf '\nIMPORTANT:\n'
+printf '\nIMPORTANT - DOCKER GROUP ACTIVATION\n'
+printf '-----------------------------------\n'
 printf '\n'
-printf 'Your Ubuntu user was added to the Docker group.\n'
-printf 'The CURRENT SSH session does not automatically receive the\n'
-printf 'new Docker group membership.\n'
+printf 'The user "%s" has been added to the docker group.\n' \
+    "${INSTALL_USER}"
+printf '\n'
+printf 'Linux does not update supplementary groups inside the\n'
+printf 'SSH/VS Code Remote SSH session that was already running\n'
+printf 'before this installer changed the group membership.\n'
 
 
 printf '\n'
-printf 'Disconnect from this EC2 instance and reconnect using\n'
-printf 'VS Code Remote SSH before continuing the project.\n'
+printf 'FULLY disconnect the current VS Code Remote SSH session.\n'
+printf 'Then reconnect to securecart-workstation and open a NEW\n'
+printf 'terminal before continuing.\n'
 
 
 printf '\n'
 printf 'After reconnecting, run:\n'
 printf '\n'
-
 printf '  id\n'
+printf '  getent group docker\n'
 printf '  docker ps\n'
+printf '\n'
+
+
+printf 'The expected conditions are:\n'
+printf '\n'
+printf '  - id includes the docker group\n'
+printf '  - getent group docker lists %s\n' "${INSTALL_USER}"
+printf '  - docker ps works WITHOUT sudo\n'
+
+
+printf '\n'
+printf 'Then verify the engineering tools:\n'
+printf '\n'
 printf '  git --version\n'
 printf '  java -version\n'
-printf '  mvn --version\n'
-printf '  aws --version\n'
+printf '  javac -version\n'
+printf '  mvn -version\n'
+printf '  docker --version\n'
+printf '  docker compose version\n'
 printf '  terraform version\n'
+printf '  aws --version\n'
 printf '  kubectl version --client\n'
 printf '  helm version --short\n'
 printf '  ggshield --version\n'
 printf '  checkov --version\n'
+printf '  rsync --version | head -n 1\n'
 
 
 printf '\n'
-printf 'AWS CREDENTIALS:\n'
+printf 'Verify pipx command locations:\n'
 printf '\n'
-printf 'AWS CLI has been installed, but this script deliberately\n'
-printf 'does NOT run "aws configure".\n'
+printf '  command -v ggshield\n'
+printf '  command -v checkov\n'
 printf '\n'
-printf 'AWS authentication will be configured separately.\n'
+printf 'Expected:\n'
+printf '\n'
+printf '  %s/.local/bin/ggshield\n' "${USER_HOME}"
+printf '  %s/.local/bin/checkov\n' "${USER_HOME}"
+
+
+printf '\n'
+printf 'AWS CREDENTIALS\n'
+printf '---------------\n'
+printf '\n'
+printf 'AWS CLI is installed, but AWS authentication has NOT been\n'
+printf 'configured by this script.\n'
+printf '\n'
+printf 'Configure AWS authentication separately in the next step.\n'
 
 
 printf '\n'
