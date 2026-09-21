@@ -17,3 +17,7 @@ terraform.tfvars
 !*.tfvars.example
 reports/
 .zap/
+# Terraform generated plan files
+*.tfplan
+**/tfplan
+
