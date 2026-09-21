@@ -1,0 +1,38 @@
+name: Terraform Lab
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Terraform action
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply, destroy]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  terraform:
+    environment: lab
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/terraform/environments/lab
+    env:
+      TF_VAR_admin_principal_arn: ${{ vars.ADMIN_PRINCIPAL_ARN }}
+      TF_VAR_cluster_endpoint_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+      - run: terraform validate
+      - if: inputs.action == 'plan'
+        run: terraform plan -var="github_owner=${{ github.repository_owner }}" -var="github_repository=${{ github.event.repository.name }}"
+      - if: inputs.action == 'apply'
+        run: terraform apply -auto-approve -var="github_owner=${{ github.repository_owner }}" -var="github_repository=${{ github.event.repository.name }}"
+      - if: inputs.action == 'destroy'
+        run: terraform destroy -auto-approve -var="github_owner=${{ github.repository_owner }}" -var="github_repository=${{ github.event.repository.name }}"
