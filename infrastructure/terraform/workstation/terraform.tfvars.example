@@ -1,0 +1,2 @@
+key_name = "YOUR_EXISTING_KEY_PAIR_NAME"
+ssh_cidr = "203.0.113.10/32"

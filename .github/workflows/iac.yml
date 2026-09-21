@@ -1,0 +1,22 @@
+name: IaC Security
+on:
+  pull_request:
+    paths: ["infrastructure/terraform/**", ".github/workflows/iac.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  terraform-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive infrastructure/terraform
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infrastructure/terraform
+          framework: terraform
+          quiet: true
+          soft_fail: false

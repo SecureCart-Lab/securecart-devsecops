@@ -1,0 +1,82 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build, test and enforce JaCoCo
+        run: mvn -B clean verify -Ddependency-check.skip=true
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    env:
+      GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - run: pipx install ggshield
+      - name: Validate GitGuardian token
+        run: |
+          if [ -z "$GITGUARDIAN_API_KEY" ]; then
+            echo "::error::Create the repository secret GITGUARDIAN_API_KEY before enabling this required check."
+            exit 1
+          fi
+      - name: Scan repository history and working tree
+        run: ggshield secret scan repo .
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: '21', cache: maven }
+      - name: OWASP Dependency-Check
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          args=()
+          if [ -n "$NVD_API_KEY" ]; then
+            args+=("-DnvdApiKey=$NVD_API_KEY")
+          else
+            echo "NVD_API_KEY is not configured. Dependency-Check can still run, but NVD updates may be slower or rate-limited."
+          fi
+          mvn -B org.owasp:dependency-check-maven:check "${args[@]}"
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-check-report
+          path: target/dependency-check-report.*
+
+
+  notify:
+    if: always()
+    needs: [build-test, secret-scan, dependency-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Optional Slack CI notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BUILD: ${{ needs.build-test.result }}
+          SECRETS: ${{ needs.secret-scan.result }}
+          DEPS: ${{ needs.dependency-scan.result }}
+        run: |
+          [ -z "$SLACK_WEBHOOK_URL" ] && exit 0
+          payload=$(jq -n --arg text "SecureCart CI: build=$BUILD secrets=$SECRETS dependencies=$DEPS — $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" '{text:$text}')
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
