@@ -6,7 +6,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -DskipTests dependency:go-offline
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 mvn -q clean verify -DskipTests=false -Ddependency-check.skip=true
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 RUN groupadd --system securecart && useradd --system --gid securecart --create-home securecart
 WORKDIR /app
 COPY --from=build /workspace/target/securecart-*.jar /app/securecart.jar
