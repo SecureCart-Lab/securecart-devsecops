@@ -21,3 +21,6 @@ reports/
 *.tfplan
 **/tfplan
 
+
+# Added by ggshield
+.cache_ggshield
