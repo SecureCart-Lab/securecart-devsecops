@@ -1,0 +1,9 @@
+secret:
+  ignored_matches:
+  - match: 94e22afe770c8a7d21df7044a1d77a5bbff80bf25ce5e43c382f0af08ec283da
+    name: SecureCart example database placeholder
+  - match: 4a14c2574c2e045c5687864f84dc9e3b0156c3e2d022c2eb45e156f178dbcda5
+    name: SecureCart local student demo credential
+  - match: 9be007ecac902aedd1b41f7e8ec7c2595afc8d0aadafb30da2e7a63409dbaf67
+    name: SecureCart local admin demo credential
+version: 2
