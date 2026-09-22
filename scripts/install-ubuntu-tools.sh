@@ -122,12 +122,22 @@ printf '============================================================\n'
 
 
 # -----------------------------------------------------------------------------
-# 7. Validate sudo access
+# 7. Validate passwordless sudo access
 # -----------------------------------------------------------------------------
 
-printf '\n==> Validating sudo access\n'
+printf '\n==> Validating passwordless sudo access\n'
 
-sudo -v
+if ! sudo -n true 2>/dev/null; then
+    echo "ERROR: Passwordless sudo is required for this installer."
+    echo
+    echo "Verify with:"
+    echo
+    echo "  sudo -n whoami"
+    echo
+    exit 1
+fi
+
+printf '[OK] Passwordless sudo access is available.\n'
 
 
 # =============================================================================
@@ -646,7 +656,7 @@ checkov --version
 
 
 printf '\n--- rsync ---------------------------------------\n'
-rsync --version | head -n 1
+rsync --version | sed -n '1p'
 
 
 # =============================================================================
@@ -711,7 +721,7 @@ printf '  kubectl version --client\n'
 printf '  helm version --short\n'
 printf '  ggshield --version\n'
 printf '  checkov --version\n'
-printf '  rsync --version | head -n 1\n'
+printf '  rsync --version | sed -n '1p'\n'
 
 
 printf '\n'
