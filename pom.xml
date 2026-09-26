@@ -23,7 +23,7 @@
         <dependency-check.version>12.2.2</dependency-check.version>
         <jacoco.version>0.8.13</jacoco.version>
         <tomcat.version>11.0.26</tomcat.version>
-        <sonar.maven.version>5.2.0.4988</sonar.maven.version>
+        <sonar.maven.version>5.8.0.7211</sonar.maven.version>
     </properties>
 
 <dependencies>
