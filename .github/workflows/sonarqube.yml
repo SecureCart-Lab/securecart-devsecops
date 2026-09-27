@@ -1,17 +1,24 @@
 name: SonarQube Community Scan
+
 on:
   workflow_dispatch:
   pull_request:
     types: [labeled]
+
 permissions:
   contents: read
+
 jobs:
   sonar:
     if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'run-sonar'
     runs-on: [self-hosted, linux, securecart]
+
     steps:
-      - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Test and analyze against SonarQube running on the EC2 workstation
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
