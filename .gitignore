@@ -8,6 +8,8 @@ target/
 *.log
 *.iml
 .DS_Store
+terraform.tfvars
+tfplan
 .terraform/
 *.tfstate
 *.tfstate.*
