@@ -1,5 +1,10 @@
 data "aws_caller_identity" "current" {}
 
+resource "aws_iam_openid_connect_provider" "github" {
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
 resource "aws_s3_bucket" "state" {
   #checkov:skip=CKV_AWS_18:Personal lab state bucket omits access logging to avoid creating and retaining a second log bucket; production should enable centralized access logging.
   #checkov:skip=CKV_AWS_145:Low-cost learning lab uses SSE-S3 AES256; production should evaluate a customer-managed KMS key.
@@ -42,19 +47,13 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-# The GitHub Actions OIDC provider already exists in this AWS account.
-# Read the existing provider rather than attempting to create a duplicate.
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
-}
-
 data "aws_iam_policy_document" "gha_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
 
     principals {
       type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
     }
 
     condition {
