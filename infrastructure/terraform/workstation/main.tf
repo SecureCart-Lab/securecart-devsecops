@@ -1,16 +1,15 @@
-data "aws_availability_zones" "available" {
-  state = "available"
-}
 
 data "aws_ssm_parameter" "ubuntu" {
   name = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 locals {
-  az = data.aws_availability_zones.available.names[0]
+  az = "us-east-1a"
 }
 
 resource "aws_vpc" "workstation" {
+  #checkov:skip=CKV2_AWS_11:VPC flow logs are outside the scope of this learning lab.
+
   cidr_block           = "10.30.0.0/24"
   enable_dns_support   = true
   enable_dns_hostnames = true
@@ -29,6 +28,8 @@ resource "aws_internet_gateway" "workstation" {
 }
 
 resource "aws_subnet" "public" {
+  #checkov:skip=CKV_AWS_130:Lab workstation requires a public IP for direct SSH access.
+
   vpc_id                  = aws_vpc.workstation.id
   cidr_block              = "10.30.0.0/28"
   availability_zone       = local.az
@@ -57,7 +58,16 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_default_security_group" "workstation" {
+  vpc_id = aws_vpc.workstation.id
+
+  ingress = []
+  egress  = []
+}
+
 resource "aws_security_group" "workstation" {
+  #checkov:skip=CKV_AWS_382:Lab workstation requires outbound internet access for package downloads and updates.
+
   name_prefix = "securecart-workstation-"
   description = "SecureCart workstation SSH from one trusted public IP"
   vpc_id      = aws_vpc.workstation.id
@@ -71,6 +81,7 @@ resource "aws_security_group" "workstation" {
   }
 
   egress {
+    description = "Allow outbound internet access for package downloads and updates"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -83,12 +94,18 @@ resource "aws_security_group" "workstation" {
 }
 
 resource "aws_instance" "workstation" {
+  #checkov:skip=CKV_AWS_88:Lab workstation requires a public IP for direct SSH access.
+  #checkov:skip=CKV2_AWS_41:Lab workstation does not require AWS API permissions, so no IAM instance role is attached.
+
   ami                         = data.aws_ssm_parameter.ubuntu.value
   instance_type               = var.instance_type
   key_name                    = var.key_name
   subnet_id                   = aws_subnet.public.id
   associate_public_ip_address = true
   vpc_security_group_ids      = [aws_security_group.workstation.id]
+
+  ebs_optimized = true
+  monitoring    = true
 
   root_block_device {
     volume_type           = "gp3"
@@ -102,7 +119,6 @@ resource "aws_instance" "workstation" {
     http_tokens   = "required"
   }
 
-  # Avoid T-family surplus-credit charges in a learning environment.
   credit_specification {
     cpu_credits = "standard"
   }

@@ -3,6 +3,11 @@ variable "aws_region" {
   default = "us-east-1"
 }
 
+variable "availability_zone_ids" {
+  description = "Pinned AWS Availability Zone IDs for the lab environment"
+  type        = list(string)
+}
+
 variable "project_name" {
   type    = string
   default = "securecart"

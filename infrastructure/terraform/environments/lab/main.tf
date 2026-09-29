@@ -1,10 +1,10 @@
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 locals {
   name = "${var.project_name}-${var.environment}"
-  azs  = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  azs = [
+    "us-east-1a",
+    "us-east-1b"
+  ]
 
   common_tags = {
     Project     = "SecureCart"
@@ -13,18 +13,24 @@ locals {
 }
 
 module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "6.6.1"
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-vpc.git?ref=3ffbd46fb1c7733e1b34d8666893280454e27436"
 
   name = local.name
   cidr = "10.20.0.0/16"
   azs  = local.azs
 
-  public_subnets  = ["10.20.0.0/24", "10.20.1.0/24"]
-  private_subnets = ["10.20.10.0/24", "10.20.11.0/24"]
+  public_subnets = [
+    "10.20.0.0/24",
+    "10.20.1.0/24"
+  ]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  private_subnets = [
+    "10.20.10.0/24",
+    "10.20.11.0/24"
+  ]
+
+  enable_nat_gateway   = true
+  single_nat_gateway   = true
   enable_dns_hostnames = true
 
   public_subnet_tags = {
@@ -39,8 +45,7 @@ module "vpc" {
 }
 
 module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "21.24.1"
+  source = "git::https://github.com/terraform-aws-modules/terraform-aws-eks.git?ref=081e6386ac021338f40f7716cc1a63aad3628f28"
 
   name               = local.name
   kubernetes_version = var.kubernetes_version
@@ -49,8 +54,8 @@ module "eks" {
   endpoint_private_access      = true
   endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
-  enabled_log_types                     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
-  cloudwatch_log_group_retention_in_days = 7
+  enabled_log_types                        = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  cloudwatch_log_group_retention_in_days   = 7
   enable_cluster_creator_admin_permissions = true
 
   vpc_id     = module.vpc.vpc_id
@@ -60,12 +65,15 @@ module "eks" {
     coredns = {
       most_recent = true
     }
+
     kube-proxy = {
       most_recent = true
     }
+
     vpc-cni = {
       most_recent = true
     }
+
     eks-pod-identity-agent = {
       most_recent = true
     }
@@ -79,6 +87,7 @@ module "eks" {
       desired_size   = 1
       disk_size      = 50
       capacity_type  = "ON_DEMAND"
+
       labels = {
         workload = "lab"
       }
@@ -88,9 +97,11 @@ module "eks" {
   access_entries = {
     admin = {
       principal_arn = var.admin_principal_arn
+
       policy_associations = {
         admin = {
           policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
           access_scope = {
             type = "cluster"
           }
@@ -104,6 +115,7 @@ module "eks" {
 
 resource "aws_ecr_repository" "securecart" {
   #checkov:skip=CKV_AWS_136:Low-cost learning lab uses AWS-managed AES256 encryption; production should evaluate a customer-managed KMS key.
+
   name                 = "securecart"
   image_tag_mutability = "IMMUTABLE"
 
@@ -118,23 +130,28 @@ resource "aws_ecr_repository" "securecart" {
 
 resource "aws_ecr_lifecycle_policy" "securecart" {
   repository = aws_ecr_repository.securecart.name
+
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the newest 10 images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Keep the newest 10 images"
+
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 10
+        }
+
+        action = {
+          type = "expire"
+        }
       }
-      action = {
-        type = "expire"
-      }
-    }]
+    ]
   })
 }
 
-# GitHub release role trusts the OIDC provider created by bootstrap.
+# GitHub release role trusts the existing account-level GitHub Actions OIDC provider.
 data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
@@ -183,6 +200,7 @@ data "aws_iam_policy_document" "release" {
       "ecr:UploadLayerPart",
       "ecr:CompleteLayerUpload"
     ]
+
     resources = [aws_ecr_repository.securecart.arn]
   }
 }
@@ -196,13 +214,24 @@ resource "aws_iam_role_policy" "release" {
 # EBS CSI uses EKS Pod Identity; no service-account OIDC role is required.
 resource "aws_iam_role" "ebs_csi" {
   name = "${local.name}-ebs-csi"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "pods.eks.amazonaws.com" }
-      Action    = ["sts:AssumeRole", "sts:TagSession"]
-    }]
+
+    Statement = [
+      {
+        Effect = "Allow"
+
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+
+        Action = [
+          "sts:AssumeRole",
+          "sts:TagSession"
+        ]
+      }
+    ]
   })
 }
 
@@ -214,7 +243,8 @@ resource "aws_iam_role_policy_attachment" "ebs_csi" {
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name = module.eks.cluster_name
   addon_name   = "aws-ebs-csi-driver"
-  depends_on   = [module.eks]
+
+  depends_on = [module.eks]
 }
 
 resource "aws_eks_pod_identity_association" "ebs_csi" {
@@ -222,5 +252,6 @@ resource "aws_eks_pod_identity_association" "ebs_csi" {
   namespace       = "kube-system"
   service_account = "ebs-csi-controller-sa"
   role_arn        = aws_iam_role.ebs_csi.arn
-  depends_on      = [aws_eks_addon.ebs_csi]
+
+  depends_on = [aws_eks_addon.ebs_csi]
 }

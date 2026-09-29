@@ -8,6 +8,8 @@ target/
 *.log
 *.iml
 .DS_Store
+terraform.tfvars
+tfplan
 .terraform/
 *.tfstate
 *.tfstate.*
@@ -24,3 +26,4 @@ reports/
 
 # Added by ggshield
 .cache_ggshield
+#Others

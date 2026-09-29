@@ -1,8 +1,17 @@
 data "aws_caller_identity" "current" {}
 
+resource "aws_iam_openid_connect_provider" "github" {
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
+}
+
 resource "aws_s3_bucket" "state" {
   #checkov:skip=CKV_AWS_18:Personal lab state bucket omits access logging to avoid creating and retaining a second log bucket; production should enable centralized access logging.
   #checkov:skip=CKV_AWS_145:Low-cost learning lab uses SSE-S3 AES256; production should evaluate a customer-managed KMS key.
+  #checkov:skip=CKV2_AWS_61:Lifecycle management is outside the scope of this personal lab Terraform state bucket.
+  #checkov:skip=CKV2_AWS_62:Event notifications are not required for this personal lab Terraform state bucket.
+  #checkov:skip=CKV_AWS_144:Cross-region replication is outside the scope of this personal lab environment.
+
   bucket        = "${var.project_name}-tfstate-${data.aws_caller_identity.current.account_id}"
   force_destroy = true
 
@@ -14,6 +23,7 @@ resource "aws_s3_bucket" "state" {
 
 resource "aws_s3_bucket_versioning" "state" {
   bucket = aws_s3_bucket.state.id
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -21,6 +31,7 @@ resource "aws_s3_bucket_versioning" "state" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
   bucket = aws_s3_bucket.state.id
+
   rule {
     apply_server_side_encryption_by_default {
       sse_algorithm = "AES256"
@@ -34,11 +45,6 @@ resource "aws_s3_bucket_public_access_block" "state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
-}
-
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
 }
 
 data "aws_iam_policy_document" "gha_trust" {
@@ -73,6 +79,7 @@ resource "aws_iam_role" "terraform" {
 # replace this with an approved least-privilege provisioning policy and boundary.
 resource "aws_iam_role_policy_attachment" "terraform_admin" {
   #checkov:skip=CKV_AWS_274:Personal single-account bootstrap lab only; the trust policy is repository/environment scoped. Replace AdministratorAccess with a least-privilege provisioning policy for production.
+
   role       = aws_iam_role.terraform.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
