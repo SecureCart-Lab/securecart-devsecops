@@ -10,7 +10,7 @@ permissions:
   id-token: write
 jobs:
   release:
-    environment: lab
+    environment: Lab
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

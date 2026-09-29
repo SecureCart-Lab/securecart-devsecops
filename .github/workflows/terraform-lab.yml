@@ -13,11 +13,11 @@ permissions:
   id-token: write
 jobs:
   terraform:
-    environment: lab
+    environment: Lab
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: infrastructure/terraform/environments/lab
+        working-directory: infrastructure/terraform/environments/Lab
     env:
       TF_VAR_admin_principal_arn: ${{ vars.ADMIN_PRINCIPAL_ARN }}
       TF_VAR_cluster_endpoint_public_access_cidrs: ${{ vars.EKS_PUBLIC_ACCESS_CIDRS }}
