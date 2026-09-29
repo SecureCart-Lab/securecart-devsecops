@@ -23,8 +23,8 @@ module "vpc" {
   public_subnets  = ["10.20.0.0/24", "10.20.1.0/24"]
   private_subnets = ["10.20.10.0/24", "10.20.11.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  enable_nat_gateway   = true
+  single_nat_gateway   = true
   enable_dns_hostnames = true
 
   public_subnet_tags = {
@@ -49,8 +49,8 @@ module "eks" {
   endpoint_private_access      = true
   endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
-  enabled_log_types                     = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
-  cloudwatch_log_group_retention_in_days = 7
+  enabled_log_types                        = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+  cloudwatch_log_group_retention_in_days   = 7
   enable_cluster_creator_admin_permissions = true
 
   vpc_id     = module.vpc.vpc_id
