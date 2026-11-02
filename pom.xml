@@ -22,7 +22,7 @@
         <java.version>17</java.version>
 
         <dependency-check.version>13.0.0</dependency-check.version>
-        <jacoco.version>0.8.15</jacoco.version>
+        <jacoco.version>0.8.16</jacoco.version>
         <tomcat.version>11.0.26</tomcat.version>
         <sonar.maven.version>5.8.0.7211</sonar.maven.version>
 
